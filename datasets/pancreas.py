@@ -62,7 +62,13 @@ class Pancreas(Dataset):
         case = self._cases[index]
         self._check_load_case(case)
         self._make_transforms_now(index)
-        return self._transform( self._volumes[case] ), \
+        data = self._transform( self._volumes[case] )
+        if self._use_coordconv:
+            grad_x = self._transform( self._grad_x[case] )
+            grad_y = self._transform( self._grad_y[case] )
+            grad_z = self._transform( self._grad_z[case] )
+            data = torch.cat([data, grad_x, grad_y, grad_z], dim=1)
+        return data, \
                 self._label_transform( self._pancreas[case] ), \
                 self._case_paths[index]
 
@@ -85,19 +91,15 @@ class Pancreas(Dataset):
     # These are stored as (depth, height, width) numpy arrays
     def _check_load_case(self, case):
         if self._volumes[case] is None:
-            self._volumes[case] = np.load( pj(self._data_supdir, "imgs", case),
-                    mmap_mode="r" )
-            self._pancreas[case] = np.load( pj(self._data_supdir, "pancreas",
-                case), mmap_mode="r" )
-            self._tumor[case] = np.load( pj(self._data_supdir, "tumor", case), 
+            for dic,dtype in zip([self._volumes, self._pancreas, self._tumor],
+                    ["imgs", "pancreas", "tumor"]):
+                dic[case] = np.load( pj(self._data_supdir, dtype, case),
                     mmap_mode="r" )
             if self._use_coordconv:
-                print("Have these already saved to disk as volumes!!")
-                raise
-                x,y,z = make_xyz_gradients( self._volumes[case].shape )
-                self._grad_x[case] = x
-                self._grad_y[case] = y
-                self._grad_z[case] = z
+                for dic,dtype in zip([self._grad_x, self._grad_y, self._grad_z],
+                        ["grad_x", "grad_y", "grad_z"]):
+                    dic[case] = np.load( pj(self._data_supdir, dtype, case),
+                        mmap_mode="r" )
 
     def _init_data_and_labels(self):
         imgs_dir = pj(self._data_supdir, "imgs")
