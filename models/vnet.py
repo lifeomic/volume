@@ -27,7 +27,7 @@ class ContBatchNorm3d(nn.modules.batchnorm._BatchNorm):
         super(ContBatchNorm3d, self)._check_input_dim(input)
 
     def forward(self, input):
-        self._check_input_dim(input)
+#        self._check_input_dim(input)
         return F.batch_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             True, self.momentum, self.eps)
@@ -63,8 +63,10 @@ class InputTransition(nn.Module):
         # do we want a PRELU here as well?
         out = self.bn1(self.conv1(x))
         # split input in to 16 channels
+#        x16 = torch.cat((x, x, x, x, x, x, x, x,
+#                         x, x, x, x, x, x, x, x), 0)
         x16 = torch.cat((x, x, x, x, x, x, x, x,
-                         x, x, x, x, x, x, x, x), 0)
+                         x, x, x, x, x, x, x, x), dim=1)
         out = self.relu1(torch.add(out, x16))
         return out
 
@@ -123,7 +125,7 @@ class OutputTransition(nn.Module):
         if nll:
             self.softmax = F.log_softmax
         else:
-            self.softmax = F.softmax
+            self.softmax = lambda x : F.softmax(x, dim=1)
 
     def forward(self, x):
         # convolve 32 down to 2 channels
@@ -142,8 +144,9 @@ class OutputTransition(nn.Module):
 class VNet(nn.Module):
     # the number of convolutions in each layer corresponds
     # to what is in the actual prototxt, not the intent
-    def __init__(self, elu=True, nll=False):
+    def __init__(self, elu=True, nll=False, debug=False):
         super(VNet, self).__init__()
+        self._debug = debug
         self.in_tr = InputTransition(16, elu)
         self.down_tr32 = DownTransition(16, 1, elu)
         self.down_tr64 = DownTransition(32, 2, elu)
@@ -172,30 +175,46 @@ class VNet(nn.Module):
     #     self.up_tr32 = UpTransition(32, 1)
     #     self.out_tr = OutputTransition(16)
     def forward(self, x):
+        if self._debug: print("\tx: %s" % repr(x.shape))
         out16 = self.in_tr(x)
+        if self._debug: print("\tin_tr: %s" % repr(out16.shape))
         out32 = self.down_tr32(out16)
+        if self._debug: print("\tdown_tr32: %s" % repr(out32.shape))
         out64 = self.down_tr64(out32)
+        if self._debug: print("\tdown_tr64: %s" % repr(out64.shape))
         out128 = self.down_tr128(out64)
+        if self._debug: print("\tdown_tr128: %s" % repr(out128.shape))
         out256 = self.down_tr256(out128)
+        if self._debug: print("\tdown_tr256: %s" % repr(out256.shape))
         out = self.up_tr256(out256, out128)
+        if self._debug: print("\tup_tr256: %s" % repr(out.shape))
         out = self.up_tr128(out, out64)
+        if self._debug: print("\tup_tr128: %s" % repr(out.shape))
         out = self.up_tr64(out, out32)
+        if self._debug: print("\tup_tr64: %s" % repr(out.shape))
         out = self.up_tr32(out, out16)
+        if self._debug: print("\tup_tr32: %s" % repr(out.shape))
         out = self.out_tr(out)
+        if self._debug: print("\tout_tr: %s" % repr(out.shape))
         return out
 
 
 def _test_main(args):
     cfg = vars(args)
-    model = VNet().cuda()
-    x = torch.FloatTensor(1, 1, 128, 128, 64).uniform_(0, 1).cuda()
+    model = VNet(debug=True).cuda()
+    x = torch.FloatTensor(cfg["batch_size"], 1, cfg["height"], cfg["width"],
+            cfg["depth"]).uniform_(0, 1).cuda()
     print("Input shape: %s" % repr(x.shape))
     yhat = model(x)
     print("Output shape: %s" % repr(yhat.shape))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-h", "--height", type=int, default=128)
+    parser.add_argument("-w", "--width", type=int, default=128)
+    parser.add_argument("--dp", "--depth", dest="depth", type=int, default=64)
+    parser.add_argument("-b", "--batch_size", type=int, default=1)
     args = parser.parse_args()
     _test_main(args)
 
