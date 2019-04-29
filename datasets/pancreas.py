@@ -13,12 +13,13 @@ from PIL import Image, ImageFilter
 
 import torch
 import torchvision as tv
+import torch.nn.functional as F
 from torch.distributions import Bernoulli, Uniform
 from torch.utils.data import Dataset
 
 from general.utils import expand_square_image, grow_image_to_square
 
-from utils import make_xyz_gradients
+from lo_utils.utils import make_xyz_gradients
 
 pe = os.path.exists
 pj = os.path.join
@@ -26,9 +27,14 @@ HOME = os.path.expanduser("~")
 
 # Patch size should be (depth, height, width)
 class Pancreas(Dataset):
-    def __init__(self, data_supdir, patch_size=(32,128,128), use_coordconv=True):
+    def __init__(self, data_supdir, mode="train", patch_size=(32,128,128),
+            output_cat="pancreas", use_coordconv=True, train_valid_split=0.85,
+            return_path=False):
         self._data_supdir = data_supdir
+        self._mode = mode
         self._patch_size = patch_size
+        self._return_path = return_path
+        self._train_valid_split = train_valid_split
         self._use_coordconv = use_coordconv
 
         # Data and labels
@@ -68,12 +74,20 @@ class Pancreas(Dataset):
             grad_y = self._transform( self._grad_y[case] )
             grad_z = self._transform( self._grad_z[case] )
             data = torch.cat([data, grad_x, grad_y, grad_z], dim=1)
-        return data, \
-                self._label_transform( self._pancreas[case] ), \
-                self._case_paths[index]
+        if self._return_path:
+            return data, \
+                    self._label_transform( self._pancreas[case] ), \
+                    self._case_paths[index]
+        return data, self._label_transform( self._pancreas[case] )
 
     def __len__(self):
         return len(self._volumes)
+
+    def get_class_weights(self, min_wt=1.0): # TODO
+        return 5.0,1.0
+
+    def get_name(self):
+        return "Pancreas"
 
     def init_random_vals(self):
         self._xyz_permutations = [[0,1,2], [0,2,1], [1,0,2], [1,2,0], [2,0,1],
@@ -116,18 +130,22 @@ class Pancreas(Dataset):
         volume = self._volumes[case]
         dp,ht,wd = volume.shape
         p_dp,p_ht,p_wd = self._patch_size
-        x0 = int( self._rnd_patch_x[index] * (wd - p_wd) )
-        y0 = int( self._rnd_patch_y[index] * (ht - p_ht) )
-        z0 = int( self._rnd_patch_z[index] * (dp - p_dp) )
-        x1 = x0 + p_wd
-        y1 = y0 + p_ht
-        z1 = z0 + p_dp
+        x0 = max(0, int( self._rnd_patch_x[index] * (wd - p_wd) ) )
+        y0 = max(0, int( self._rnd_patch_y[index] * (ht - p_ht) ) )
+        z0 = max(0, int( self._rnd_patch_z[index] * (dp - p_dp) ) )
+        x1 = min(wd, x0 + p_wd)
+        y1 = min(ht, y0 + p_ht)
+        z1 = min(dp, z0 + p_dp)
 
         def transform(v, p0, p1):
             x0,y0,z0 = p0
             x1,y1,z1 = p1
             v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
-            return torch.FloatTensor(v)
+            x = torch.FloatTensor(v).view((1, 1, *v.shape))
+            if v.shape != (p_dp,p_ht,p_wd):
+                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="trilinear",
+                        align_corners=False)
+            return x.view((-1, *x.shape[2:]))
             
         self._transform = lambda x : transform(x, (x0, y0, z0), (x1, y1, z1))
         self._label_transform = lambda x : transform(x, (x0, y0, z0),
