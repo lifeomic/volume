@@ -1,5 +1,5 @@
 """
-Mercilessly ripped off from mattmacy Repo
+Mercilessly ripped off from mattmacy github repo
 """
 
 import argparse
@@ -53,20 +53,29 @@ def _make_nConv(nchan, depth, elu):
 
 
 class InputTransition(nn.Module):
-    def __init__(self, outChans, elu):
+    def __init__(self, outChans, elu, inChans=1):
         super(InputTransition, self).__init__()
-        self.conv1 = nn.Conv3d(1, 16, kernel_size=5, padding=2)
+        self._inChans = inChans
+        self.conv1 = nn.Conv3d(inChans, 16, kernel_size=5, padding=2)
         self.bn1 = ContBatchNorm3d(16)
         self.relu1 = ELUCons(elu, 16)
 
     def forward(self, x):
         # do we want a PRELU here as well?
         out = self.bn1(self.conv1(x))
-        # split input in to 16 channels
+#        # split input in to 16 channels
 #        x16 = torch.cat((x, x, x, x, x, x, x, x,
 #                         x, x, x, x, x, x, x, x), 0)
-        x16 = torch.cat((x, x, x, x, x, x, x, x,
-                         x, x, x, x, x, x, x, x), dim=1)
+        # split input in to 16//inChans channels
+        # !!! TODO This is almost certainly NOT the right way to do it.  
+        # Maybe make this non-residual
+        if self._inChans==1:
+            x16 = torch.cat((x, x, x, x, x, x, x, x,
+                             x, x, x, x, x, x, x, x), dim=1)
+        elif self._inChans==2:
+            x16 = torch.cat((x, x, x, x, x, x, x, x), dim=1)
+        elif self._inChans==4:
+            x16 = torch.cat((x, x, x, x), dim=1)
         out = self.relu1(torch.add(out, x16))
         return out
 
@@ -144,10 +153,11 @@ class OutputTransition(nn.Module):
 class VNet(nn.Module):
     # the number of convolutions in each layer corresponds
     # to what is in the actual prototxt, not the intent
-    def __init__(self, elu=True, nll=False, debug=False):
+    def __init__(self, elu=True, nll=False, debug=False, num_input_ch=1):
         super(VNet, self).__init__()
         self._debug = debug
-        self.in_tr = InputTransition(16, elu)
+        self._num_input_ch = num_input_ch
+        self.in_tr = InputTransition(16, elu, self._num_input_ch)
         self.down_tr32 = DownTransition(16, 1, elu)
         self.down_tr64 = DownTransition(32, 2, elu)
         self.down_tr128 = DownTransition(64, 3, elu, dropout=True)
@@ -157,6 +167,9 @@ class VNet(nn.Module):
         self.up_tr64 = UpTransition(128, 64, 1, elu)
         self.up_tr32 = UpTransition(64, 32, 1, elu)
         self.out_tr = OutputTransition(32, elu, nll)
+
+    def get_output_ch(self): # TODO
+        return 1
 
     # The network topology as described in the diagram
     # in the VNet paper
@@ -201,9 +214,9 @@ class VNet(nn.Module):
 
 def _test_main(args):
     cfg = vars(args)
-    model = VNet(debug=True).cuda()
-    x = torch.FloatTensor(cfg["batch_size"], 1, cfg["height"], cfg["width"],
-            cfg["depth"]).uniform_(0, 1).cuda()
+    model = VNet(debug=True, num_input_ch=cfg["num_input_ch"]).cuda()
+    x = torch.FloatTensor(cfg["batch_size"], cfg["num_input_ch"],
+            cfg["height"], cfg["width"], cfg["depth"]).uniform_(0, 1).cuda()
     print("Input shape: %s" % repr(x.shape))
     yhat = model(x)
     print("Output shape: %s" % repr(yhat.shape))
@@ -211,10 +224,11 @@ def _test_main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-b", "--batch_size", type=int, default=1)
+    parser.add_argument("-c", "--num-input-chs", type=int, default=1)
     parser.add_argument("-h", "--height", type=int, default=128)
     parser.add_argument("-w", "--width", type=int, default=128)
     parser.add_argument("--dp", "--depth", dest="depth", type=int, default=64)
-    parser.add_argument("-b", "--batch_size", type=int, default=1)
     args = parser.parse_args()
     _test_main(args)
 
