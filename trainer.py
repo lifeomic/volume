@@ -107,7 +107,10 @@ def get_model(cfg):
     num_output_ch = len( output_cat.split("_") )
     num_input_ch = 4 if cfg["use_coordconv"] else 1
     model = VNet(num_input_ch=num_input_ch)
-    print("Built VNet model")
+    if cfg["use_coordconv"]:
+        print("Built VNet model with CoordConv")
+    else:
+        print("Built VNet model without CoordConv")
     if cfg["cuda"] >= 0:
         model = model.cuda( cfg["cuda"] )
     return model
@@ -174,6 +177,8 @@ def train(cfg, train_loader, test_loader, model, writer):
     elif cfg["optimizer"] == "SGD":
         optimizer = torch.optim.SGD([{"params" : model.parameters()}],
                 lr=learning_rates[lr_ct], momentum=cfg["momentum"])
+    else:
+        raise RuntimeError("Unrecognized optimizer, %s" % cfg["optimizer"])
     last_lr = learning_rates[lr_ct]
     for epoch in range( start_epoch, cfg["max_num_epochs"] ):
         if pe(pj(cfg["session_dir"], "stop_experiment.txt")):
@@ -200,14 +205,24 @@ def train(cfg, train_loader, test_loader, model, writer):
                 x = x.cuda(cudev)
                 gt = gt.cuda(cudev)
 
+#            print(x.shape, gt.shape)
             optimizer.zero_grad()
-            preds = torch.sigmoid( model(x)[:,1] ).view(-1, 1)
-            gt = gt.view(-1, gt.size(1))
-            loss = criterion(preds, gt)
-#            loss = criterion( preds.view(-1, 1), gt.view(-1, gt.size(1)))
+            preds = model(x)
+            preds = torch.sigmoid( preds.view((-1,1)) )
+            gt = gt.view((-1,1))
+#            preds = torch.sigmoid( preds.view(-1, preds.size(1)) )
+#            gt = gt.view(-1, gt.size(1))
+#            gt_onehot = torch.FloatTensor(preds.size())
+#            if cudev>=0:
+#                gt_onehot = gt_onehot.cuda(cudev)
+#            gt_onehot.zero_()
+#            gt_onehot.scatter_(1, gt, 1)
+#            loss = criterion(preds.view(-1,1), gt_onehot.view(-1,1))
+            loss = criterion( preds.view(-1, 1), gt.view(-1, gt.size(1)) )
             loss.backward()
             optimizer.step()
 
+#            print(preds.shape, gt.shape)
             F1 = get_F1(preds, gt)
             Dice = get_Dice(preds, gt)
             iou = get_iou(preds, gt).item()

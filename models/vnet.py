@@ -52,6 +52,8 @@ def _make_nConv(nchan, depth, elu):
     return nn.Sequential(*layers)
 
 
+# NOTE It is assumed that all additional channels on top of channel 0 are 
+# CoordConv or other input augmentation channels, NOT e.g. RGB
 class InputTransition(nn.Module):
     def __init__(self, outChans, elu, inChans=1):
         super(InputTransition, self).__init__()
@@ -63,19 +65,12 @@ class InputTransition(nn.Module):
     def forward(self, x):
         # do we want a PRELU here as well?
         out = self.bn1(self.conv1(x))
-#        # split input in to 16 channels
+        # split input in to 16 channels
+        x = x[:,0,:,:,:].view((-1, 1, *x.shape[2:]))
 #        x16 = torch.cat((x, x, x, x, x, x, x, x,
-#                         x, x, x, x, x, x, x, x), 0)
-        # split input in to 16//inChans channels
-        # !!! TODO This is almost certainly NOT the right way to do it.  
-        # Maybe make this non-residual
-        if self._inChans==1:
-            x16 = torch.cat((x, x, x, x, x, x, x, x,
-                             x, x, x, x, x, x, x, x), dim=1)
-        elif self._inChans==2:
-            x16 = torch.cat((x, x, x, x, x, x, x, x), dim=1)
-        elif self._inChans==4:
-            x16 = torch.cat((x, x, x, x), dim=1)
+#                         x, x, x, x, x, x, x, x), 0) # 0 is just incorrect!
+        x16 = torch.cat((x, x, x, x, x, x, x, x,
+                         x, x, x, x, x, x, x, x), dim=1)
         out = self.relu1(torch.add(out, x16))
         return out
 
@@ -104,7 +99,8 @@ class DownTransition(nn.Module):
 class UpTransition(nn.Module):
     def __init__(self, inChans, outChans, nConvs, elu, dropout=False):
         super(UpTransition, self).__init__()
-        self.up_conv = nn.ConvTranspose3d(inChans, outChans // 2, kernel_size=2, stride=2)
+        self.up_conv = nn.ConvTranspose3d(inChans, outChans // 2, kernel_size=2,
+                stride=2)
         self.bn1 = ContBatchNorm3d(outChans // 2)
         self.do1 = passthrough
         self.do2 = nn.Dropout3d()
@@ -125,12 +121,15 @@ class UpTransition(nn.Module):
 
 
 class OutputTransition(nn.Module):
-    def __init__(self, inChans, elu, nll):
+    def __init__(self, inChans, outChans, elu, nll):
         super(OutputTransition, self).__init__()
-        self.conv1 = nn.Conv3d(inChans, 2, kernel_size=5, padding=2)
-        self.bn1 = ContBatchNorm3d(2)
-        self.conv2 = nn.Conv3d(2, 2, kernel_size=1)
-        self.relu1 = ELUCons(elu, 2)
+        self._inChans = inChans
+        self._outChans = outChans
+
+        self.conv1 = nn.Conv3d(inChans, outChans, kernel_size=5, padding=2)
+        self.bn1 = ContBatchNorm3d(outChans)
+        self.relu1 = ELUCons(elu, outChans)
+        self.conv2 = nn.Conv3d(outChans, outChans, kernel_size=1)
         if nll:
             self.softmax = F.log_softmax
         else:
@@ -141,22 +140,24 @@ class OutputTransition(nn.Module):
         out = self.relu1(self.bn1(self.conv1(x)))
         out = self.conv2(out)
 
-        # make channels the last axis
-        out = out.permute(0, 2, 3, 4, 1).contiguous()
-        # flatten
-        out = out.view(out.numel() // 2, 2)
-        out = self.softmax(out)
-        # treat channel 0 as the predicted output
+#        # make channels the last axis
+#        out = out.permute(0, 2, 3, 4, 1).contiguous()
+#        # flatten
+#        out = out.view(out.numel() // 2, 2)
+#        out = self.softmax(out)
+#        # treat channel 0 as the predicted output
         return out
 
 
 class VNet(nn.Module):
     # the number of convolutions in each layer corresponds
     # to what is in the actual prototxt, not the intent
-    def __init__(self, elu=True, nll=False, debug=False, num_input_ch=1):
+    def __init__(self, elu=True, nll=False, debug=False, num_input_ch=1,
+            num_output_ch=1):
         super(VNet, self).__init__()
         self._debug = debug
         self._num_input_ch = num_input_ch
+        self._num_output_ch = num_output_ch
         self.in_tr = InputTransition(16, elu, self._num_input_ch)
         self.down_tr32 = DownTransition(16, 1, elu)
         self.down_tr64 = DownTransition(32, 2, elu)
@@ -166,7 +167,7 @@ class VNet(nn.Module):
         self.up_tr128 = UpTransition(256, 128, 2, elu, dropout=True)
         self.up_tr64 = UpTransition(128, 64, 1, elu)
         self.up_tr32 = UpTransition(64, 32, 1, elu)
-        self.out_tr = OutputTransition(32, elu, nll)
+        self.out_tr = OutputTransition(32, self._num_output_ch, elu, nll)
 
     def get_output_ch(self): # TODO
         return 1
@@ -214,9 +215,13 @@ class VNet(nn.Module):
 
 def _test_main(args):
     cfg = vars(args)
+    cudev = cfg["cuda"]
     model = VNet(debug=True, num_input_ch=cfg["num_input_ch"]).cuda()
-    x = torch.FloatTensor(cfg["batch_size"], cfg["num_input_ch"],
-            cfg["height"], cfg["width"], cfg["depth"]).uniform_(0, 1).cuda()
+    x = torch.FloatTensor(cfg["batch_size"], cfg["num_input_ch"], cfg["depth"],
+            cfg["height"], cfg["width"]).uniform_(0, 1).cuda()
+    if cudev>=0:
+        model.cuda(cudev)
+        x.cuda(cudev)
     print("Input shape: %s" % repr(x.shape))
     yhat = model(x)
     print("Output shape: %s" % repr(yhat.shape))
@@ -225,10 +230,11 @@ def _test_main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-b", "--batch_size", type=int, default=1)
-    parser.add_argument("-c", "--num-input-chs", type=int, default=1)
+    parser.add_argument("-c", "--num-input-ch", type=int, default=1)
     parser.add_argument("-h", "--height", type=int, default=128)
     parser.add_argument("-w", "--width", type=int, default=128)
     parser.add_argument("--dp", "--depth", dest="depth", type=int, default=64)
+    parser.add_argument("--cuda", type=int, default=0, help="-1 for CPU")
     args = parser.parse_args()
     _test_main(args)
 

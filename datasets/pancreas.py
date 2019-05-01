@@ -73,7 +73,7 @@ class Pancreas(Dataset):
             grad_x = self._transform( self._grad_x[case] )
             grad_y = self._transform( self._grad_y[case] )
             grad_z = self._transform( self._grad_z[case] )
-            data = torch.cat([data, grad_x, grad_y, grad_z], dim=1)
+            data = torch.cat([data, grad_x, grad_y, grad_z], dim=0)
         if self._return_path:
             return data, \
                     self._label_transform( self._pancreas[case] ), \
@@ -147,8 +147,17 @@ class Pancreas(Dataset):
                         align_corners=False)
             return x.view((-1, *x.shape[2:]))
             
+        def label_transform(v, p0, p1):
+            x0,y0,z0 = p0
+            x1,y1,z1 = p1
+            v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
+            x = torch.FloatTensor(v).view((1, 1, *v.shape))
+            if v.shape != (p_dp,p_ht,p_wd):
+                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="nearest")
+            return x.view((-1, *x.shape[2:]))
+            
         self._transform = lambda x : transform(x, (x0, y0, z0), (x1, y1, z1))
-        self._label_transform = lambda x : transform(x, (x0, y0, z0),
+        self._label_transform = lambda x : label_transform(x, (x0, y0, z0),
                 (x1, y1, z1))
 
 
