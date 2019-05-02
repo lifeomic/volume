@@ -205,24 +205,14 @@ def train(cfg, train_loader, test_loader, model, writer):
                 x = x.cuda(cudev)
                 gt = gt.cuda(cudev)
 
-#            print(x.shape, gt.shape)
             optimizer.zero_grad()
             preds = model(x)
             preds = torch.sigmoid( preds.view((-1,1)) )
             gt = gt.view((-1,1))
-#            preds = torch.sigmoid( preds.view(-1, preds.size(1)) )
-#            gt = gt.view(-1, gt.size(1))
-#            gt_onehot = torch.FloatTensor(preds.size())
-#            if cudev>=0:
-#                gt_onehot = gt_onehot.cuda(cudev)
-#            gt_onehot.zero_()
-#            gt_onehot.scatter_(1, gt, 1)
-#            loss = criterion(preds.view(-1,1), gt_onehot.view(-1,1))
-            loss = criterion( preds.view(-1, 1), gt.view(-1, gt.size(1)) )
+            loss = criterion( preds, gt )
             loss.backward()
             optimizer.step()
 
-#            print(preds.shape, gt.shape)
             F1 = get_F1(preds, gt)
             Dice = get_Dice(preds, gt)
             iou = get_iou(preds, gt).item()
@@ -246,112 +236,112 @@ def train(cfg, train_loader, test_loader, model, writer):
 
         optimizer.zero_grad()
 
-#        if epoch % si == si-1:
-#            model.train(False)
-#            model.eval()
-#            running_loss = 0.0
-#            running_F1 = np.zeros((num_tasks,))
-#            running_Dice = np.zeros((num_tasks,))
-#            running_iou = np.zeros((num_tasks,))
-#            ct = 0
-#            for i, data in enumerate(test_loader):
-#                if pe(pj(cfg["session_dir"], "stop_valid.txt")):
-#                    with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
-#                        fp.write("Breaking out of validation at iteration %d\n"\
-#                                % i)
-#                    break
-#                x,gt,_ = data
-#                if cudev >= 0:
-#                    x = x.cuda(cudev)
-#                    gt = gt.cuda(cudev)
-#
-#                preds = torch.sigmoid( model(x) )
-#                loss = criterion( preds.view(preds.size(0), -1),
-#                        gt.view(gt.size(0), -1))
-#                loss.backward()
-#                # Bizarrely, the line above is necessary or else several GB
-#                # of additional memory are consumed
-#
-#                running_loss += loss.item()
-#                task_sz = preds.view(preds.size(0), -1).size(1) // num_tasks
-#                for t in range(num_tasks):
-#                    preds_view = preds.view(preds.size(0),-1)\
-#                            [:, t*task_sz : (t+1)*task_sz]
-#                    gt_view = gt.view(gt.size(0),-1)\
-#                            [:, t*task_sz : (t+1)*task_sz]
-#                    F1 = get_F1(preds_view, gt_view)
-#                    Dice = get_Dice(preds_view, gt_view)
-#                    iou = get_iou(preds_view, gt_view).item()
-#                    running_F1[t] += F1
-#                    running_Dice[t] += Dice
-#                    running_iou[t] += iou 
-#                ct += 1
-#
-#            optimizer.zero_grad()
-#
-#            mean_test_loss = running_loss / ct
-#            print("***Mean test loss: %f" % (mean_test_loss))
-#            writer.add_scalars("Loss", { "test" : mean_test_loss }, iter_ct)
-#            F1_text = "***Mean test F1: "
-#            Dice_text = "***Mean test Dice: "
-#            iou_text = "***Mean test IOU: "
-#            log_text = "Epoch %03d: Loss: %.4f" % (epoch, mean_test_loss)
-#            mean_test_F1s = []
-#            mean_test_Dices = []
-#            mean_test_ious = []
-#            for t in range(num_tasks):
-#                mean_test_F1 = running_F1[t] / ct
-#                mean_test_Dice = running_Dice[t] / ct
-#                mean_test_iou = running_iou[t] / ct
-#
-#                task = tasks[t]
-#                writer.add_scalars("F1",
-#                        { "test/"+task : mean_test_F1 }, iter_ct)
-#                writer.add_scalars("Dice",
-#                        { "test/"+task : mean_test_Dice }, iter_ct)
-#                writer.add_scalars("IOU",
-#                        { "test/"+task : mean_test_iou }, iter_ct)
-#
-#                F1_text += "%s, %f; " % (task, mean_test_F1)
-#                Dice_text += "%s, %f; " % (task, mean_test_Dice)
-#                iou_text += "%s, %f; " % (task, mean_test_iou)
-#                log_text += "\n\t%s: F1 %.4f, Dice %.4f, IOU %.4f" % (task,
-#                        mean_test_F1, mean_test_Dice, mean_test_iou)
-#                mean_test_F1s.append(mean_test_F1)
-#                mean_test_Dices.append(mean_test_Dice)
-#                mean_test_ious.append(mean_test_iou)
-#            print(F1_text)
-#            print(Dice_text)
-#            print(iou_text)
-#            with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
-#                fp.write(log_text + "\n")
+        if epoch % si == si-1:
+            model.train(False)
+            model.eval()
+            running_loss = 0.0
+            running_F1 = np.zeros((num_tasks,))
+            running_Dice = np.zeros((num_tasks,))
+            running_iou = np.zeros((num_tasks,))
+            ct = 0
+            for i, data in enumerate(test_loader):
+                if pe(pj(cfg["session_dir"], "stop_valid.txt")):
+                    with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
+                        fp.write("Breaking out of validation at iteration %d\n"\
+                                % i)
+                    break
+                x,gt,_ = data
+                if cudev >= 0:
+                    x = x.cuda(cudev)
+                    gt = gt.cuda(cudev)
+
+                preds = torch.sigmoid( model(x) )
+                loss = criterion( preds.view(preds.size(0), -1),
+                        gt.view(gt.size(0), -1))
+                loss.backward()
+                # Bizarrely, the line above is necessary or else several GB
+                # of additional memory are consumed
+
+                running_loss += loss.item()
+                task_sz = preds.view(preds.size(0), -1).size(1) // num_tasks
+                for t in range(num_tasks):
+                    preds_view = preds.view(preds.size(0),-1)\
+                            [:, t*task_sz : (t+1)*task_sz]
+                    gt_view = gt.view(gt.size(0),-1)\
+                            [:, t*task_sz : (t+1)*task_sz]
+                    F1 = get_F1(preds_view, gt_view)
+                    Dice = get_Dice(preds_view, gt_view)
+                    iou = get_iou(preds_view, gt_view).item()
+                    running_F1[t] += F1
+                    running_Dice[t] += Dice
+                    running_iou[t] += iou 
+                ct += 1
+
+            optimizer.zero_grad()
+
+            mean_test_loss = running_loss / ct
+            print("***Mean test loss: %f" % (mean_test_loss))
+            writer.add_scalars("Loss", { "test" : mean_test_loss }, iter_ct)
+            F1_text = "***Mean test F1: "
+            Dice_text = "***Mean test Dice: "
+            iou_text = "***Mean test IOU: "
+            log_text = "Epoch %03d: Loss: %.4f" % (epoch, mean_test_loss)
+            mean_test_F1s = []
+            mean_test_Dices = []
+            mean_test_ious = []
+            for t in range(num_tasks):
+                mean_test_F1 = running_F1[t] / ct
+                mean_test_Dice = running_Dice[t] / ct
+                mean_test_iou = running_iou[t] / ct
+
+                task = tasks[t]
+                writer.add_scalars("F1",
+                        { "test/"+task : mean_test_F1 }, iter_ct)
+                writer.add_scalars("Dice",
+                        { "test/"+task : mean_test_Dice }, iter_ct)
+                writer.add_scalars("IOU",
+                        { "test/"+task : mean_test_iou }, iter_ct)
+
+                F1_text += "%s, %f; " % (task, mean_test_F1)
+                Dice_text += "%s, %f; " % (task, mean_test_Dice)
+                iou_text += "%s, %f; " % (task, mean_test_iou)
+                log_text += "\n\t%s: F1 %.4f, Dice %.4f, IOU %.4f" % (task,
+                        mean_test_F1, mean_test_Dice, mean_test_iou)
+                mean_test_F1s.append(mean_test_F1)
+                mean_test_Dices.append(mean_test_Dice)
+                mean_test_ious.append(mean_test_iou)
+            print(F1_text)
+            print(Dice_text)
+            print(iou_text)
+            with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
+                fp.write(log_text + "\n")
 #
 #            seg_inference(model, test_loader, cfg, epoch=epoch, num_out=20,
 #                    criterion=criterion)
 #
-#            if mean_test_loss < best_test_loss:
-#                best_model_path = save_model_pop_old(model, cfg["model"], epoch,
-#                        models_dir)
-#                best_test_loss = mean_test_loss
-#                best_test_F1 = np.mean(mean_test_F1s)
-#                best_test_Dice = np.mean(mean_test_Dices)
-#                best_test_iou = np.mean(mean_test_ious)
-#                epoch_drop_ct = 0
-#            elif epoch_drop_ct+1 == cfg["num_epochs_for_drop"]:
-#                lr_ct += 1
-#                if lr_ct == len(learning_rates):
-#                    print("Training ended due to early stopping.")
-#                    print("Session directory: %s" % (cfg["session_dir"]))
-#                    break
-#                print("Learning rate reduced to %f" % learning_rates[lr_ct])
-#                if best_model_path is not None:
-#                    sd = torch.load(best_model_path)
-#                    model.load_state_dict(sd)
-#                epoch_drop_ct = 0
-#            else:
-#                epoch_drop_ct += 1
-#
-#            retain_session_dir( cfg["session_dir"] )
+            if mean_test_loss < best_test_loss:
+                best_model_path = save_model_pop_old(model, cfg["model"], epoch,
+                        models_dir)
+                best_test_loss = mean_test_loss
+                best_test_F1 = np.mean(mean_test_F1s)
+                best_test_Dice = np.mean(mean_test_Dices)
+                best_test_iou = np.mean(mean_test_ious)
+                epoch_drop_ct = 0
+            elif epoch_drop_ct+1 == cfg["num_epochs_for_drop"]:
+                lr_ct += 1
+                if lr_ct == len(learning_rates):
+                    print("Training ended due to early stopping.")
+                    print("Session directory: %s" % (cfg["session_dir"]))
+                    break
+                print("Learning rate reduced to %f" % learning_rates[lr_ct])
+                if best_model_path is not None:
+                    sd = torch.load(best_model_path)
+                    model.load_state_dict(sd)
+                epoch_drop_ct = 0
+            else:
+                epoch_drop_ct += 1
+
+            retain_session_dir( cfg["session_dir"] )
 
         torch.cuda.empty_cache()
 

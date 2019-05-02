@@ -117,13 +117,10 @@ class Pancreas(Dataset):
 
     def _init_data_and_labels(self):
         imgs_dir = pj(self._data_supdir, "imgs")
-        self._cases = sorted( [f for f in os.listdir(imgs_dir) \
+        all_cases = sorted( [f for f in os.listdir(imgs_dir) \
                 if f.endswith(".npy")] )
-        self._case_paths = [pj(imgs_dir,c) for c in self._cases]
-        for c in self._cases:
-            self._volumes[c] = None
-            self._pancreas[c] = None
-            self._tumor[c] = None
+        all_case_paths = [pj(imgs_dir,c) for c in all_cases]
+        self._set_train_and_valid(all_case_paths)
 
     def _make_transforms_now(self, index):
         case = self._cases[index]
@@ -160,21 +157,45 @@ class Pancreas(Dataset):
         self._label_transform = lambda x : label_transform(x, (x0, y0, z0),
                 (x1, y1, z1))
 
+    def _set_train_and_valid(self, all_case_paths):
+        self._cases = []
+        self._case_paths = []
+        if self._train_valid_split < 1.0 and self._mode != "test":
+            train_ct = 0
+            for i in range( len(all_case_paths) ):
+                if train_ct/(i+1) < self._train_valid_split:
+                    if self._mode == "train":
+                        self._case_paths.append( all_case_paths[i] )
+                    train_ct += 1
+                elif self._mode == "valid":
+                    self._case_paths.append( all_case_paths[i] )
+        else:
+            self._case_paths = all_case_paths
+
+        for case_path in self._case_paths:
+            c = os.path.basename( os.path.abspath(case_path) )
+            self._cases.append(c)
+            self._volumes[c] = None
+            self._pancreas[c] = None
+            self._tumor[c] = None
+
 
 def _test_main(args):
     cfg = vars(args)
-    dataset = Pancreas(cfg["data_supdir"], use_coordconv=cfg["use_coordconv"])
+    dataset = Pancreas(cfg["data_supdir"], use_coordconv=cfg["use_coordconv"],
+            return_path=True)
     N = len(dataset)
     print("Created Pancreas dataset, length %d" % N)
     output_dir = cfg["output_dir"]
     if pe(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
+    num_input_ch = 4 if cfg["use_coordconv"] else 1
     for index in range(cfg["num_outputs"]):
         vol,label,return_path = dataset[index]
         title = os.path.splitext( os.path.basename(return_path) )[0]
         path = pj(output_dir, "%d_%s.png" % (index, title))
-        vol = vol.view((-1, 1, *vol.shape[1:]))
+        vol = vol.view((-1, 1, num_input_ch, *vol.shape[1:]))
         label = label.view((-1, 1, *label.shape[1:]))
         tv.utils.save_image(vol, path)
         label_path = pj(output_dir, "%d_%s_label.png" % (index, title))
