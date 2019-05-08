@@ -15,7 +15,7 @@ import torch
 import torchvision as tv
 import torch.nn.functional as F
 from torch.distributions import Bernoulli, Uniform
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 from general.utils import expand_square_image, grow_image_to_square
 
@@ -24,6 +24,29 @@ from lo_utils.utils import make_xyz_gradients
 pe = os.path.exists
 pj = os.path.join
 HOME = os.path.expanduser("~")
+
+
+def get_Pancreas_loaders(cfg, loaders="train_and_test"):
+    ht,wd,dp = cfg["patch_depth"], cfg["patch_height"], cfg["patch_width"]
+    ds_kwargs = { "data_supdir" : cfg["pancreas_data_supdir"],
+            "output_cat" : cfg["pancreas_output_cat"],
+            "patch_size" : (ht,wd,dp) }
+    for k in ["use_coordconv", "train_valid_split"]:
+        ds_kwargs[k] = cfg[k]
+    dl_kwargs = { "num_workers" : cfg["num_workers"],
+            "batch_size" : cfg["batch_size"] }
+
+    test_dataset = Pancreas(mode="valid", return_path=True, **ds_kwargs)
+    test_loader = DataLoader(test_dataset, shuffle=False, **dl_kwargs)
+    if loaders=="train_and_test":
+        train_dataset = Pancreas(mode="train", **ds_kwargs)
+        train_loader = DataLoader(train_dataset, shuffle=True, **dl_kwargs)
+        return train_loader,test_loader
+
+    if loaders!="test":
+        raise RuntimeError("Unrecognized value for loaders, %s" % loaders)
+    return test_loader
+
 
 # Patch size should be (depth, height, width)
 class Pancreas(Dataset):
@@ -89,6 +112,21 @@ class Pancreas(Dataset):
     def get_name(self):
         return "Pancreas"
 
+    def get_shape(self, index):
+        case = self._cases[index]
+        self._check_load_case(case)
+        return self._volumes[case].shape
+
+    # p0, p1 should be given as (depth, height, width), in voxel coordinates
+    def get_patch(self, index, p0, p1):
+        case = self._cases[index]
+        self._check_load_case(case)
+        (z0,y0,x0),(z1,y1,x1) = p0, p1
+        dp,ht,wd = self.get_shape(index)
+        if z0<0 or y0<0 or x0<0 or z1>dp or y1>ht or x1>wd:
+            raise RuntimeError("Invalid patch coordinates, %s, %s" % (p0, p1))
+        return self._volumes[case][z0:z1, y0:y1, x0:x1]
+
     def init_random_vals(self):
         self._xyz_permutations = [[0,1,2], [0,2,1], [1,0,2], [1,2,0], [2,0,1],
                 [2,1,0]]
@@ -127,9 +165,14 @@ class Pancreas(Dataset):
         volume = self._volumes[case]
         dp,ht,wd = volume.shape
         p_dp,p_ht,p_wd = self._patch_size
-        x0 = max(0, int( self._rnd_patch_x[index] * (wd - p_wd) ) )
-        y0 = max(0, int( self._rnd_patch_y[index] * (ht - p_ht) ) )
-        z0 = max(0, int( self._rnd_patch_z[index] * (dp - p_dp) ) )
+        if self._mode=="train":
+            x0 = (wd - p_wd) // 2
+            y0 = (ht - p_ht) // 2
+            z0 = (dp - p_dp) // 2
+        else:
+            x0 = max(0, int( self._rnd_patch_x[index] * (wd - p_wd) ) )
+            y0 = max(0, int( self._rnd_patch_y[index] * (ht - p_ht) ) )
+            z0 = max(0, int( self._rnd_patch_z[index] * (dp - p_dp) ) )
         x1 = min(wd, x0 + p_wd)
         y1 = min(ht, y0 + p_ht)
         z1 = min(dp, z0 + p_dp)
