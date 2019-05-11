@@ -8,6 +8,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def get_vnet(cfg):
+    output_cat = cfg[ cfg["dataset"] + "_output_cat" ]
+    num_output_ch = len( output_cat.split("_") )
+    num_input_ch = 4 if cfg["use_coordconv"] else 1
+    model = VNet(num_input_ch=num_input_ch)
+    if cfg["use_coordconv"]:
+        print("Built VNet model with CoordConv")
+    else:
+        print("Built VNet model without CoordConv")
+    if cfg["cuda"] >= 0:
+        model = model.cuda( cfg["cuda"] )
+    return model
+
 def passthrough(x, **kwargs):
     return x
 

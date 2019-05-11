@@ -83,8 +83,11 @@ class Pancreas(Dataset):
         # Transforms
         self._transform = None
         self._label_transform = None
+        self._simple_transform = None
+        self._simple_label_transform = None
 
         self._init_data_and_labels()
+        self._make_transforms()
         self.init_random_vals()
 
     def __getitem__(self, index):
@@ -112,20 +115,25 @@ class Pancreas(Dataset):
     def get_name(self):
         return "Pancreas"
 
-    def get_shape(self, index):
-        case = self._cases[index]
-        self._check_load_case(case)
-        return self._volumes[case].shape
-
     # p0, p1 should be given as (depth, height, width), in voxel coordinates
     def get_patch(self, index, p0, p1):
         case = self._cases[index]
         self._check_load_case(case)
-        (z0,y0,x0),(z1,y1,x1) = p0, p1
-        dp,ht,wd = self.get_shape(index)
-        if z0<0 or y0<0 or x0<0 or z1>dp or y1>ht or x1>wd:
-            raise RuntimeError("Invalid patch coordinates, %s, %s" % (p0, p1))
-        return self._volumes[case][z0:z1, y0:y1, x0:x1]
+        patch = self._simple_transform( self._volumes[case], p0, p1 )
+        if self._use_coordconv:
+            grad_x = self._simple_transform( self._grad_x[case], p0, p1 )
+            grad_y = self._simple_transform( self._grad_y[case], p0, p1 )
+            grad_z = self._simple_transform( self._grad_z[case], p0, p1 )
+            patch = torch.cat([patch, grad_x, grad_y, grad_z], dim=0)
+        return patch
+
+    def get_path(self, index):
+        return self._case_paths[index]
+
+    def get_shape(self, index):
+        case = self._cases[index]
+        self._check_load_case(case)
+        return self._volumes[case].shape
 
     def init_random_vals(self):
         self._xyz_permutations = [[0,1,2], [0,2,1], [1,0,2], [1,2,0], [2,0,1],
@@ -160,6 +168,32 @@ class Pancreas(Dataset):
         all_case_paths = [pj(imgs_dir,c) for c in all_cases]
         self._set_train_and_valid(all_case_paths)
 
+    # p0, p1 have coordinates in order (x,y,z)
+    def _make_transforms(self):
+        def transform(v, p0, p1):
+            p_wd,p_ht,p_dp = [p[1] - p[0] for p in zip(p0, p1)]
+            (x0,y0,z0),(x1,y1,z1) = p0, p1
+            v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
+            x = torch.FloatTensor(v.copy()).view((1, 1, *v.shape))
+            if v.shape != (p_dp,p_ht,p_wd):
+                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="trilinear",
+                        align_corners=False)
+            return x.view((-1, *x.shape[2:]))
+        # Without copy(), get "Trying to resize storage that is not resizable"
+        # error
+            
+        def label_transform(v, p0, p1):
+            p_wd,p_ht,p_dp = [p[1] - p[0] for p in zip(p0, p1)]
+            (x0,y0,z0),(x1,y1,z1) = p0, p1
+            v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
+            x = torch.FloatTensor(v.copy()).view((1, 1, *v.shape))
+            if v.shape != (p_dp,p_ht,p_wd):
+                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="nearest")
+            return x.view((-1, *x.shape[2:]))
+
+        self._simple_transform = transform
+        self._simple_label_transform = label_transform
+
     def _make_transforms_now(self, index):
         case = self._cases[index]
         volume = self._volumes[case]
@@ -177,28 +211,10 @@ class Pancreas(Dataset):
         y1 = min(ht, y0 + p_ht)
         z1 = min(dp, z0 + p_dp)
 
-        def transform(v, p0, p1):
-            x0,y0,z0 = p0
-            x1,y1,z1 = p1
-            v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
-            x = torch.FloatTensor(v).view((1, 1, *v.shape))
-            if v.shape != (p_dp,p_ht,p_wd):
-                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="trilinear",
-                        align_corners=False)
-            return x.view((-1, *x.shape[2:]))
-            
-        def label_transform(v, p0, p1):
-            x0,y0,z0 = p0
-            x1,y1,z1 = p1
-            v = (v[z0:z1, y0:y1, x0:x1]).astype(np.float32) / 255.0
-            x = torch.FloatTensor(v).view((1, 1, *v.shape))
-            if v.shape != (p_dp,p_ht,p_wd):
-                x = F.interpolate(x, (p_dp,p_ht,p_wd), mode="nearest")
-            return x.view((-1, *x.shape[2:]))
-            
-        self._transform = lambda x : transform(x, (x0, y0, z0), (x1, y1, z1))
-        self._label_transform = lambda x : label_transform(x, (x0, y0, z0),
+        self._transform = lambda x : self._simple_transform(x, (x0, y0, z0),
                 (x1, y1, z1))
+        self._label_transform = lambda x : self._simple_label_transform(x,
+                (x0, y0, z0), (x1, y1, z1))
 
     def _set_train_and_valid(self, all_case_paths):
         self._cases = []
@@ -223,7 +239,7 @@ class Pancreas(Dataset):
             self._tumor[c] = None
 
 
-def _test_main(args):
+def _test_setup(args):
     cfg = vars(args)
     dataset = Pancreas(cfg["data_supdir"], use_coordconv=cfg["use_coordconv"],
             return_path=True)
@@ -233,13 +249,23 @@ def _test_main(args):
     if pe(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
+    return cfg,dataset,output_dir
+
+def _test_infer(args):
+    cfg,dataset,output_dir = _test_setup(args)
+    raise NotImplementedError()
+
+def _test_main(args):
+    cfg,dataset,output_dir = _test_setup(args)
     num_input_ch = 4 if cfg["use_coordconv"] else 1
     for index in range(cfg["num_outputs"]):
         vol,label,return_path = dataset[index]
         title = os.path.splitext( os.path.basename(return_path) )[0]
         path = pj(output_dir, "%d_%s.png" % (index, title))
-        vol = vol.view((-1, 1, num_input_ch, *vol.shape[1:]))
-        label = label.view((-1, 1, *label.shape[1:]))
+        # We treat depth*num_input_ch as batch size
+        vol = vol.view((-1, 1, *vol.shape[2:]))
+        label = label.view((-1, 1, *label.shape[2:]))
+        print(vol.shape, label.shape)
         tv.utils.save_image(vol, path)
         label_path = pj(output_dir, "%d_%s_label.png" % (index, title))
         tv.utils.save_image(label, label_path)
@@ -249,11 +275,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--data-supdir", type=str,
             default=pj(HOME, "Datasets/Pancreas/Volumes"))
+    parser.add_argument("-t", "--test", type=str, default="main",
+            choices=["main", "inference"])
     parser.add_argument("--no-cc", "--no-coordconv", dest="use_coordconv",
             action="store_false")
     parser.add_argument("-o", "--output-dir", type=str,
             default=pj(HOME, "Training/volume/test_out/Pancreas"))
     parser.add_argument("-n", "--num-outputs", type=int, default=10)
     args = parser.parse_args()
-    _test_main(args)
+    if args.test=="main":
+        _test_main(args)
+    else:
+        _test_infer(args)
 

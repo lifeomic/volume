@@ -25,9 +25,10 @@ from pytorch.pyt_utils.utils import get_summary_writer, save_model_pop_old
 from lo_utils.utils import weighted_bce_loss, weighted_dice
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from datasets.pancreas import Pancreas
+from datasets.pancreas import Pancreas, get_Pancreas_loaders
 
-from models.vnet import VNet
+from inference import seg_tile_inference
+from models.vnet import get_vnet, VNet
 
 pe = os.path.exists
 pj = os.path.join
@@ -87,22 +88,7 @@ def get_iou(preds, gt, threshold=0.5):
     iou = intersection / (union + 1e-6)
     return iou
 
-def get_Pancreas_loaders(cfg):
-    ht,wd,dp = cfg["patch_depth"], cfg["patch_height"], cfg["patch_width"]
-    ds_kwargs = { "data_supdir" : cfg["pancreas_data_supdir"],
-            "output_cat" : cfg["pancreas_output_cat"],
-            "patch_size" : (ht,wd,dp) }
-    for k in ["use_coordconv", "train_valid_split"]:
-        ds_kwargs[k] = cfg[k]
-    dl_kwargs = { "num_workers" : cfg["num_workers"],
-            "batch_size" : cfg["batch_size"] }
-    train_dataset = Pancreas(mode="train", **ds_kwargs)
-    train_loader = DataLoader(train_dataset, shuffle=True, **dl_kwargs)
-    test_dataset = Pancreas(mode="valid", return_path=True, **ds_kwargs)
-    test_loader = DataLoader(test_dataset, shuffle=False, **dl_kwargs)
-    return train_loader,test_loader
-
-def get_model(cfg):
+def get_vnet(cfg):
     output_cat = cfg[ cfg["dataset"] + "_output_cat" ]
     num_output_ch = len( output_cat.split("_") )
     num_input_ch = 4 if cfg["use_coordconv"] else 1
@@ -315,10 +301,10 @@ def train(cfg, train_loader, test_loader, model, writer):
             print(iou_text)
             with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
                 fp.write(log_text + "\n")
-#
-#            seg_inference(model, test_loader, cfg, epoch=epoch, num_out=20,
-#                    criterion=criterion)
-#
+
+            seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=20,
+                    criterion=criterion)
+
             if mean_test_loss < best_test_loss:
                 best_model_path = save_model_pop_old(model, cfg["model"], epoch,
                         models_dir)
@@ -355,7 +341,7 @@ def train(cfg, train_loader, test_loader, model, writer):
     write_training_results(results_dict, cfg, os.path.dirname(\
             cfg["sessions_supdir"]), "trainer")
 
-    seg_inference(model, test_loader, cfg, epoch=epoch, num_out=-1,
+    seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=-1,
             criterion=criterion)
 
 def main(args):
@@ -380,7 +366,7 @@ def main(args):
             % (train_loader.dataset.get_name(), len(train_loader.dataset)))
     print("Length of validation dataset, %s: %d" \
             % (test_loader.dataset.get_name(), len(test_loader.dataset)))
-    model = get_model(cfg)
+    model = get_vnet(cfg)
     cfg["dataset_mode"] = "train" # This is for inference
     train(cfg, train_loader, test_loader, model, writer)
 

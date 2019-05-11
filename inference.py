@@ -28,9 +28,8 @@ from pytorch.pyt_utils.utils import get_recent_model, get_resnet_model
 
 from lo_utils.utils import make_xyzr_gradients
 
-from datasets.palm import PALM, get_is_pmyopia, is_segmentation, is_multi
-from datasets.pancreas import Pancreas
-from models.VNet import get_vnet, VNet
+from datasets.pancreas import get_Pancreas_loaders, Pancreas
+from models.vnet import get_vnet, VNet
 
 pe = os.path.exists
 pj = os.path.join
@@ -54,17 +53,21 @@ def _get_covering_patches(index, dataset, cfg):
     patch_dp = cfg["patch_depth"]
     patch_ht = cfg["patch_height"]
     patch_wd = cfg["patch_width"]
-    i,j,k = 0,0,0
     patches = []
+    print("Volume shape: %d, %d, %d" % (dp, ht, wd))
+    print("Patch shape: %d, %d, %d" % (patch_dp, patch_ht, patch_wd))
+    k = 0
     while k == 0 or k <= dp-patch_dp:
-        k += 1
+        j = 0
         while j <= ht-patch_ht:
-            j += 1
+            i = 0
             while i <= wd-patch_wd:
-                p0 = (k*patch_dp, j*patch_ht, i*patch_wd)
-                p1 = ( (k+1)*patch_dp, (j+1)*patch_ht, (i+1)*patch_wd )
+                p0 = (k,j,i)
+                p1 = ( k+patch_dp, j+patch_ht, i+patch_wd )
                 patches.append( (p0,p1) )
-                i += 1
+                i += patch_wd
+            j += patch_ht
+        k += patch_dp
     return patches
 
 # Make the radial weighting mask determining the weight of the voxel predictions
@@ -72,11 +75,12 @@ def _make_patch_weight(size, sd=2.0, min_wt=0.01):
     _,_,_,grad_r = make_xyzr_gradients(size, cast_to_uint8=False)
     grad_r = sd * grad_r / 255.0
     grad_r = norm.pdf(grad_r)
-    grad_r = np.minimum([grad_r, min_wt*np.ones_like(grad_r)])
-    return grad_r
+    grad_r = np.minimum(grad_r, min_wt*np.ones_like(grad_r))
+    return torch.FloatTensor(grad_r)
 
 # Fuses a covering set of patches into a single volume
 def _merge_patch_preds(patch_preds, patch_coords):
+    cudev = patch_preds[0].device
     dp,ht,wd,patch_dp,patch_ht,patch_wd = -1,-1,-1,-1,-1,-1
     for p in patch_coords:
         if p[1][0] > dp:
@@ -95,23 +99,26 @@ def _merge_patch_preds(patch_preds, patch_coords):
                 or patch_wd != p[1][2] - p[0][2]:
             raise RuntimeError("Inconsistent patch dimensions")
     patch_weight = _make_patch_weight( (patch_dp, patch_ht, patch_wd) )
-    expanded_patches = []
-    expanded_weight_masks = []
+    patch_weight = patch_weight.to(cudev)
+    raw_patch_vol = torch.zeros(dp,ht,wd).to(cudev)
+    weights_vol = torch.zeros(dp,ht,wd).to(cudev)
+#    expanded_patches = []
+#    expanded_weight_masks = []
     for patch,pco in zip(patch_preds, patch_coords):
         (z0,y0,x0),(z1,y1,x1) = pco
-        expat = np.zeros((dp,ht,wd), dtype=np.float32)
+        expat = torch.zeros(dp,ht,wd).to(cudev)
         expat[ z0:z1, y0:y1, x0:x1 ] = patch*patch_weight
-        expanded_patches.append(expat)
+        raw_patch_vol += expat
+#        expanded_patches.append(expat)
 
-        wt_mask = np.zeros((dp,ht,wd), dtype=np.float32)
+        wt_mask = torch.zeros(dp,ht,wd).to(cudev)
         wt_mask[ z0:z1, y0:y1, x0:x1 ] = patch_weight
-        expanded_weight_masks.append(wt_mask)
+#        expanded_weight_masks.append(wt_mask)
+        weights_vol += wt_mask
 
-    raw_patch_vol = np.zeros((dp,ht,wd), dtype=np.float32)
-    weights_vol = np.zeros((dp,ht,wd), dtype=np.float32)
-    for p,w in zip(expanded_patches, expanded_weight_masks):
-        raw_patch_vol += p
-        weights_vol += w
+#    for p,w in zip(expanded_patches, expanded_weight_masks):
+#        raw_patch_vol += p
+#        weights_vol += w
 
     pred_volume = raw_patch_vol / weights_vol
     return pred_volume
@@ -168,31 +175,53 @@ def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20,
         seg_dirs.append(seg_dir)
         annos_dirs.append(annos_dir)
 
+    binarizer = lambda x : 255 if x > 127 else 0
     length=0
     dataset = data_loader.dataset
     pred_stacks = []
     img_paths = []
+    indexes = []
+    annos_dir = annos_dirs[0] # TODO
     for index in range( len(dataset) ):
         patch_coords = _get_covering_patches(index, dataset, cfg)
-        for i,p in enumerate(patch_coords):
-            patch = dataset.get_patch(index, p[0], p[1])
-            patch_preds.append( torch.sigmoid( model(patch) ) )
+#        for p in patch_coords:
+#            print(p)
+        patch_preds = []
+        for p in patch_coords:
+#            print(p)
+            patch = dataset.get_patch(index, p[0][::-1], p[1][::-1])
+            patch = patch.view((-1, *patch.shape))
+            if cudev >= 0:
+                patch = patch.cuda(cudev)
+#            print(patch.shape)
+            patch_pred = torch.sigmoid( model(patch) ).detach()
+#            print("\t", patch_pred.shape)
+            patch_preds.append(patch_pred)
         pred = _merge_patch_preds(patch_preds, patch_coords)
+        print(pred.shape)
         pred_stacks.append(pred)
         img_paths.append( dataset.get_path(index) )
 
-        length += preds.size(0)
+#        length += pred_stacks.size(0)
+        length += 1
+        indexes.append(index)
+
+        pred = pred.view((-1, 1, *pred.shape[1:]))
+        pred[ pred<0.5 ] = 0.0
+        pred[ pred>=0.5 ] = 1.0
+#        pred_img = pred_img.convert("L").point(binarizer, mode="1")
+        tv.utils.save_image(pred, pj(annos_dir, "%03d.png" % index))
+
         if epoch>=0 and length==num_out:
             break
-
-    for pred_stack in pred_stacks: # This is supposed to handle multi-class
-        for p,(d,anno_d) in enumerate( zip(seg_dirs, annos_dirs) ):
-            preds = pred_stack[p,:,:]
-            preds = preds.view((1, *preds.shape))
-            _write_binary_preds(preds, img_paths, d, anno_d)
-
+#    for pred_stack in pred_stacks: # This is supposed to handle multi-class
+#        for p,(d,anno_d) in enumerate( zip(seg_dirs, annos_dirs) ):
+#            preds = pred_stack[p,:,:]
+#            preds = preds.view((1, *preds.shape))
+#            _write_binary_preds(preds, img_paths, d, anno_d)
+#
     print("...Done.  %d Volumetric predictions written to %s" \
-            % (length, seg_dir))
+            % (length, annos_dir))
 
 def set_up_config(cfg):
     logfile = pj( cfg["source_session_dir"], "session.log" )
@@ -200,12 +229,10 @@ def set_up_config(cfg):
     cfg["model_path"] = get_recent_model( pj(source_cfg["session_dir"],
         "models") )
     for k in ["dataset", "palm_data_supdir", "pancreas_data_supdir",
-            "palm_output_cat", "input_size",
+            "pancreas_output_cat", "input_size",
+            "use_coordconv", "patch_depth", "patch_height", "patch_width",
             "model", "num_base_chans", "num_unet_layers", "broadcast_si",
-            "structured_inputs", "decoder_type", "folder_suffix"]:
-        if k=="folder_suffix":
-            cfg[k] = source_cfg[k]
-            continue
+            "structured_inputs", "decoder_type"]:
         if k not in source_cfg:
             print("Warning, key %s is missing.  This is okay if running " \
                     "inference on an older dataset" % k)
@@ -223,6 +250,10 @@ def set_up_config(cfg):
         cfg["output_dir"] = pj(source_cfg["session_dir"], "eval")
     if not pe(cfg["output_dir"]):
         os.makedirs( cfg["output_dir"] )
+    if cfg["dataset_mode"] == "train":
+        cfg["train_valid_split"] = 1.0
+    else:
+        cfg["train_valid_split"] = 0.0        
     cfg["output_path"] = ""
     print("Configuration:")
     devnull = [print("%s: %s" % (k,v)) for k,v in cfg.items()]
@@ -232,7 +263,7 @@ def main(args):
     cfg = vars(args)
     cfg = set_up_config(cfg)
     if cfg["dataset"]=="pancreas":
-        data_loader = get_Pancreas_loader(cfg, loaders="test")
+        data_loader = get_Pancreas_loaders(cfg, loaders="test")
     else:
         raise RuntimeError("Unrecognized dataset, %s" % cfg["dataset"])
     model = get_vnet(cfg)
@@ -258,7 +289,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-m", "--model-name", type=str,
             help="If empty, most recent model will be chosen")
-    parser.add_argument("-b", "--batch-size", type=int, default=64)
+    parser.add_argument("-b", "--batch-size", type=int, default=4)
     parser.add_argument("--num-workers", type=int, default=24)
     parser.add_argument("--cuda", type=int, default=0, help="-1 for CPU")
 
