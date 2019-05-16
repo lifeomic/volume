@@ -143,10 +143,10 @@ class OutputTransition(nn.Module):
         self.bn1 = ContBatchNorm3d(outChans)
         self.relu1 = ELUCons(elu, outChans)
         self.conv2 = nn.Conv3d(outChans, outChans, kernel_size=1)
-        if nll:
-            self.softmax = F.log_softmax
-        else:
-            self.softmax = lambda x : F.softmax(x, dim=1)
+#        if nll:
+#            self.softmax = F.log_softmax
+#        else:
+#            self.softmax = lambda x : F.softmax(x, dim=1)
 
     def forward(self, x):
         # convolve 32 down to 2 channels

@@ -70,6 +70,30 @@ def _get_covering_patches(index, dataset, cfg):
         k += patch_dp
     return patches
 
+def _get_full_pred(index, dataset, model, cfg):
+    cudev = cfg["cuda"]
+    patch_coords = _get_covering_patches(index, dataset, cfg)
+#    for p in patch_coords:
+#        print(p)
+    patch_preds = []
+    for p in patch_coords:
+#        print(p)
+        patch = dataset.get_patch(index, p[0][::-1], p[1][::-1])
+        patch = patch.view((-1, *patch.shape))
+        if cudev >= 0:
+            patch = patch.cuda(cudev)
+#        print(patch.shape)
+        patch_pred = model(patch)
+#        print(torch.min(patch_pred), torch.max(patch_pred),
+#                torch.median(patch_pred))
+        patch_pred = torch.sigmoid(patch_pred).detach()
+#        print("\t", torch.min(patch_pred), torch.max(patch_pred),
+#                torch.median(patch_pred))
+#        print("\t", patch_pred.shape)
+        patch_preds.append(patch_pred)
+    pred = _merge_patch_preds(patch_preds, patch_coords).detach()
+    return pred
+
 # Make the radial weighting mask determining the weight of the voxel predictions
 def _make_patch_weight(size, sd=2.0, min_wt=0.01):
     _,_,_,grad_r = make_xyzr_gradients(size, cast_to_uint8=False)
@@ -150,8 +174,14 @@ def _write_pred_image(pred, pred_dir, img_path, resize_before_save=False):
     pred_img.save(pred_path)
     return img_stub, img, pred_path, pred_img
     
-def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20,
-        criterion=None):
+def load_vnet(cfg):
+    model = get_vnet(cfg)
+    model.load_state_dict( torch.load(cfg["model_path"]) )
+    model.eval()
+    model.train = False
+    return model
+
+def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20):
     cudev = cfg["cuda"]
     print("Running tiled segmentation inference now, data set has %d items..." \
             % len(data_loader.dataset))
@@ -175,7 +205,6 @@ def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20,
         seg_dirs.append(seg_dir)
         annos_dirs.append(annos_dir)
 
-    binarizer = lambda x : 255 if x > 127 else 0
     length=0
     dataset = data_loader.dataset
     pred_stacks = []
@@ -183,23 +212,12 @@ def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20,
     indexes = []
     annos_dir = annos_dirs[0] # TODO
     for index in range( len(dataset) ):
-        patch_coords = _get_covering_patches(index, dataset, cfg)
-#        for p in patch_coords:
-#            print(p)
-        patch_preds = []
-        for p in patch_coords:
-#            print(p)
-            patch = dataset.get_patch(index, p[0][::-1], p[1][::-1])
-            patch = patch.view((-1, *patch.shape))
-            if cudev >= 0:
-                patch = patch.cuda(cudev)
-#            print(patch.shape)
-            patch_pred = torch.sigmoid( model(patch) ).detach()
-#            print("\t", patch_pred.shape)
-            patch_preds.append(patch_pred)
-        pred = _merge_patch_preds(patch_preds, patch_coords)
-        print(pred.shape)
-        pred_stacks.append(pred)
+        if index != 5: continue
+        print("\tRunning inference on volume %d..." % index)
+        torch.cuda.empty_cache()
+        pred = _get_full_pred(index, dataset, model, cfg)
+        print("Prediction:", pred.shape)
+#        pred_stacks.append(pred)
         img_paths.append( dataset.get_path(index) )
 
 #        length += pred_stacks.size(0)
@@ -207,11 +225,14 @@ def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20,
         indexes.append(index)
 
         pred = pred.view((-1, 1, *pred.shape[1:]))
+#        print(torch.min(pred), torch.max(pred), torch.median(pred))
         pred[ pred<0.5 ] = 0.0
         pred[ pred>=0.5 ] = 1.0
-#        pred_img = pred_img.convert("L").point(binarizer, mode="1")
+#        print(torch.sum(pred==0.0), torch.sum(pred==1.0), torch.mean(pred))
+#        print(pred.shape)
         tv.utils.save_image(pred, pj(annos_dir, "%03d.png" % index))
 
+        print("\t...Done")
         if epoch>=0 and length==num_out:
             break
 #    for pred_stack in pred_stacks: # This is supposed to handle multi-class
@@ -266,9 +287,7 @@ def main(args):
         data_loader = get_Pancreas_loaders(cfg, loaders="test")
     else:
         raise RuntimeError("Unrecognized dataset, %s" % cfg["dataset"])
-    model = get_vnet(cfg)
-    model.eval()
-    model.train = False
+    model = load_vnet(cfg)
     seg_tile_inference(model, data_loader, cfg)
 
 if __name__ == "__main__":

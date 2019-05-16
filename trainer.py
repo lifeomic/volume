@@ -236,7 +236,7 @@ def train(cfg, train_loader, test_loader, model, writer):
                         fp.write("Breaking out of validation at iteration %d\n"\
                                 % i)
                     break
-                x,gt,_ = data
+                x,gt,vol_path = data
                 if cudev >= 0:
                     x = x.cuda(cudev)
                     gt = gt.cuda(cudev)
@@ -302,8 +302,7 @@ def train(cfg, train_loader, test_loader, model, writer):
             with open(pj(cfg["session_dir"], "session.log"), "a") as fp:
                 fp.write(log_text + "\n")
 
-            seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=20,
-                    criterion=criterion)
+            seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=20)
 
             if mean_test_loss < best_test_loss:
                 best_model_path = save_model_pop_old(model, cfg["model"], epoch,
@@ -341,8 +340,7 @@ def train(cfg, train_loader, test_loader, model, writer):
     write_training_results(results_dict, cfg, os.path.dirname(\
             cfg["sessions_supdir"]), "trainer")
 
-    seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=-1,
-            criterion=criterion)
+    seg_tile_inference(model, test_loader, cfg, epoch=epoch, num_out=-1)
 
 def main(args):
     cfg = vars(args)
@@ -387,7 +385,6 @@ if __name__ == "__main__":
     parser.add_argument("--pancreas-output-cat", type=str, default="pancreas")
 
     # Augmentation
-    parser.add_argument("--crop-pct", type=float, default=0.75)
     parser.add_argument("--no-coordconv", dest="use_coordconv",
             action="store_false")
 
@@ -419,7 +416,7 @@ if __name__ == "__main__":
             help="Adam: weight decay (L2 penalty)")
 
     # Loss function and weighting
-    parser.add_argument("--loss-func", type=str, default="bce",
+    parser.add_argument("--loss-func", type=str, default="dice",
             choices=["bce", "dice"])
     parser.add_argument("--ce-weighting", type=str, default="class",
             choices=["none", "class"],

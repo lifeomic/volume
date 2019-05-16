@@ -194,6 +194,7 @@ class Pancreas(Dataset):
         self._simple_transform = transform
         self._simple_label_transform = label_transform
 
+    # !!! TODO !!! gradients need to be registered with TRUE WORLD COORDINATES
     def _make_transforms_now(self, index):
         case = self._cases[index]
         volume = self._volumes[case]
@@ -207,9 +208,7 @@ class Pancreas(Dataset):
             x0 = max(0, int( self._rnd_patch_x[index] * (wd - p_wd) ) )
             y0 = max(0, int( self._rnd_patch_y[index] * (ht - p_ht) ) )
             z0 = max(0, int( self._rnd_patch_z[index] * (dp - p_dp) ) )
-        x1 = min(wd, x0 + p_wd)
-        y1 = min(ht, y0 + p_ht)
-        z1 = min(dp, z0 + p_dp)
+        x1,y1,z1 = x0 + p_wd, y0 + p_ht, z0 + p_dp
 
         self._transform = lambda x : self._simple_transform(x, (x0, y0, z0),
                 (x1, y1, z1))
