@@ -54,8 +54,8 @@ def _get_covering_patches(index, dataset, cfg):
     patch_ht = cfg["patch_height"]
     patch_wd = cfg["patch_width"]
     patches = []
-    print("Volume shape: %d, %d, %d" % (dp, ht, wd))
-    print("Patch shape: %d, %d, %d" % (patch_dp, patch_ht, patch_wd))
+#    print("Volume shape: %d, %d, %d" % (dp, ht, wd))
+#    print("Patch shape: %d, %d, %d" % (patch_dp, patch_ht, patch_wd))
     k = 0
     while k == 0 or k <= dp-patch_dp:
         j = 0
@@ -86,13 +86,13 @@ def _get_full_pred(index, dataset, model, cfg):
         patch_pred = model(patch)
 #        print(torch.min(patch_pred), torch.max(patch_pred),
 #                torch.median(patch_pred))
-        patch_pred = torch.sigmoid(patch_pred).detach()
+        patch_pred = torch.sigmoid(patch_pred).cpu().data.numpy()
 #        print("\t", torch.min(patch_pred), torch.max(patch_pred),
 #                torch.median(patch_pred))
 #        print("\t", patch_pred.shape)
         patch_preds.append(patch_pred)
-    pred = _merge_patch_preds(patch_preds, patch_coords).detach()
-    return pred
+    pred = _merge_patch_preds(patch_preds, patch_coords)
+    return torch.FloatTensor(pred)
 
 # Make the radial weighting mask determining the weight of the voxel predictions
 def _make_patch_weight(size, sd=2.0, min_wt=0.01):
@@ -100,11 +100,10 @@ def _make_patch_weight(size, sd=2.0, min_wt=0.01):
     grad_r = sd * grad_r / 255.0
     grad_r = norm.pdf(grad_r)
     grad_r = np.minimum(grad_r, min_wt*np.ones_like(grad_r))
-    return torch.FloatTensor(grad_r)
+    return grad_r
 
 # Fuses a covering set of patches into a single volume
 def _merge_patch_preds(patch_preds, patch_coords):
-    cudev = patch_preds[0].device
     dp,ht,wd,patch_dp,patch_ht,patch_wd = -1,-1,-1,-1,-1,-1
     for p in patch_coords:
         if p[1][0] > dp:
@@ -123,19 +122,18 @@ def _merge_patch_preds(patch_preds, patch_coords):
                 or patch_wd != p[1][2] - p[0][2]:
             raise RuntimeError("Inconsistent patch dimensions")
     patch_weight = _make_patch_weight( (patch_dp, patch_ht, patch_wd) )
-    patch_weight = patch_weight.to(cudev)
-    raw_patch_vol = torch.zeros(dp,ht,wd).to(cudev)
-    weights_vol = torch.zeros(dp,ht,wd).to(cudev)
+    raw_patch_vol = np.zeros((dp,ht,wd))
+    weights_vol = np.zeros((dp,ht,wd))
 #    expanded_patches = []
 #    expanded_weight_masks = []
     for patch,pco in zip(patch_preds, patch_coords):
         (z0,y0,x0),(z1,y1,x1) = pco
-        expat = torch.zeros(dp,ht,wd).to(cudev)
+        expat = np.zeros((dp,ht,wd))
         expat[ z0:z1, y0:y1, x0:x1 ] = patch*patch_weight
         raw_patch_vol += expat
 #        expanded_patches.append(expat)
 
-        wt_mask = torch.zeros(dp,ht,wd).to(cudev)
+        wt_mask = np.zeros((dp,ht,wd))
         wt_mask[ z0:z1, y0:y1, x0:x1 ] = patch_weight
 #        expanded_weight_masks.append(wt_mask)
         weights_vol += wt_mask
@@ -212,11 +210,11 @@ def seg_tile_inference(model, data_loader, cfg, epoch=-1, num_out=20):
     indexes = []
     annos_dir = annos_dirs[0] # TODO
     for index in range( len(dataset) ):
-        if index != 5: continue
+#        if index != 5: continue
         print("\tRunning inference on volume %d..." % index)
         torch.cuda.empty_cache()
         pred = _get_full_pred(index, dataset, model, cfg)
-        print("Prediction:", pred.shape)
+#        print("Prediction:", pred.shape)
 #        pred_stacks.append(pred)
         img_paths.append( dataset.get_path(index) )
 

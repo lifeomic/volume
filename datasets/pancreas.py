@@ -201,13 +201,13 @@ class Pancreas(Dataset):
         dp,ht,wd = volume.shape
         p_dp,p_ht,p_wd = self._patch_size
         if self._mode=="train":
-            x0 = (wd - p_wd) // 2
-            y0 = (ht - p_ht) // 2
-            z0 = (dp - p_dp) // 2
-        else:
             x0 = max(0, int( self._rnd_patch_x[index] * (wd - p_wd) ) )
             y0 = max(0, int( self._rnd_patch_y[index] * (ht - p_ht) ) )
             z0 = max(0, int( self._rnd_patch_z[index] * (dp - p_dp) ) )
+        else:
+            x0 = (wd - p_wd) // 2
+            y0 = (ht - p_ht) // 2
+            z0 = (dp - p_dp) // 2
         x1,y1,z1 = x0 + p_wd, y0 + p_ht, z0 + p_dp
 
         self._transform = lambda x : self._simple_transform(x, (x0, y0, z0),
