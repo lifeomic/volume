@@ -22,10 +22,10 @@ from general.utils import copy_code, get_project_dir, \
         make_or_get_session_dir, plot_confusion_matrix, retain_session_dir, \
         write_training_results, write_arguments, write_parameters
 from pytorch.pyt_utils.utils import get_summary_writer, save_model_pop_old
-from lo_utils.utils import weighted_bce_loss, weighted_dice
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datasets.pancreas import Pancreas, get_Pancreas_loaders
+from volume_utils import weighted_bce_loss, weighted_dice
 
 from inference import seg_tile_inference
 from models.vnet import get_vnet, VNet

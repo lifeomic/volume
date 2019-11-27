@@ -19,7 +19,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from general.utils import expand_square_image, grow_image_to_square
 
-from lo_utils.utils import make_xyz_gradients
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from volume_utils import make_xyz_gradients
 
 pe = os.path.exists
 pj = os.path.join

@@ -26,10 +26,10 @@ from torch.utils.data import DataLoader
 from general.utils import read_session_config
 from pytorch.pyt_utils.utils import get_recent_model, get_resnet_model
 
-from lo_utils.utils import make_xyzr_gradients
-
 from datasets.pancreas import get_Pancreas_loaders, Pancreas
 from models.vnet import get_vnet, VNet
+from volume_utils import make_xyzr_gradients
+
 
 pe = os.path.exists
 pj = os.path.join
