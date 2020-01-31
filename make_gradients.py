@@ -1,6 +1,6 @@
 """
 This is a one-off file to make the x, y, z gradients corresponding to the
-Pancreas volumes
+KiTS19 volumes
 """
 
 import argparse
@@ -31,7 +31,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--data-supdir", type=str,
-            default=pj(HOME, "Datasets/Pancreas/Volumes"))
+            default=pj(HOME, "Datasets/BiomedVolumes/KiTS19/Volumes"))
     args = parser.parse_args()
     main(args)
 

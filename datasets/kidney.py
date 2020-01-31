@@ -1,5 +1,5 @@
 """
-This dataset loads the KiTS Pancreas dataset into memory and serves subvolumes
+This dataset loads the KiTS Kidney dataset into memory and serves subvolumes
 """
 
 import argparse
@@ -27,20 +27,20 @@ pj = os.path.join
 HOME = os.path.expanduser("~")
 
 
-def get_Pancreas_loaders(cfg, loaders="train_and_test"):
+def get_Kidney_loaders(cfg, loaders="train_and_test"):
     ht,wd,dp = cfg["patch_depth"], cfg["patch_height"], cfg["patch_width"]
-    ds_kwargs = { "data_supdir" : cfg["pancreas_data_supdir"],
-            "output_cat" : cfg["pancreas_output_cat"],
+    ds_kwargs = { "data_supdir" : cfg["kidney_data_supdir"],
+            "output_cat" : cfg["kidney_output_cat"],
             "patch_size" : (ht,wd,dp) }
     for k in ["use_coordconv", "train_valid_split"]:
         ds_kwargs[k] = cfg[k]
     dl_kwargs = { "num_workers" : cfg["num_workers"],
             "batch_size" : cfg["batch_size"] }
 
-    test_dataset = Pancreas(mode="valid", return_path=True, **ds_kwargs)
+    test_dataset = Kidney(mode="valid", return_path=True, **ds_kwargs)
     test_loader = DataLoader(test_dataset, shuffle=False, **dl_kwargs)
     if loaders=="train_and_test":
-        train_dataset = Pancreas(mode="train", **ds_kwargs)
+        train_dataset = Kidney(mode="train", **ds_kwargs)
         train_loader = DataLoader(train_dataset, shuffle=True, **dl_kwargs)
         return train_loader,test_loader
 
@@ -50,9 +50,9 @@ def get_Pancreas_loaders(cfg, loaders="train_and_test"):
 
 
 # Patch size should be (depth, height, width)
-class Pancreas(Dataset):
+class Kidney(Dataset):
     def __init__(self, data_supdir, mode="train", patch_size=(32,128,128),
-            output_cat="pancreas", use_coordconv=True, train_valid_split=0.85,
+            output_cat="kidney", use_coordconv=True, train_valid_split=0.85,
             return_path=False):
         self._data_supdir = data_supdir
         self._mode = mode
@@ -67,7 +67,7 @@ class Pancreas(Dataset):
         self._grad_x = {}
         self._grad_y = {}
         self._grad_z = {}
-        self._pancreas = {}
+        self._kidney = {}
         self._tumor = {}
         self._volumes = {}
 
@@ -103,9 +103,9 @@ class Pancreas(Dataset):
             data = torch.cat([data, grad_x, grad_y, grad_z], dim=0)
         if self._return_path:
             return data, \
-                    self._label_transform( self._pancreas[case] ), \
+                    self._label_transform( self._kidney[case] ), \
                     self._case_paths[index]
-        return data, self._label_transform( self._pancreas[case] )
+        return data, self._label_transform( self._kidney[case] )
 
     def __len__(self):
         return len(self._volumes)
@@ -114,7 +114,7 @@ class Pancreas(Dataset):
         return 5.0,1.0
 
     def get_name(self):
-        return "Pancreas"
+        return "Kidney"
 
     # p0, p1 should be given as (depth, height, width), in voxel coordinates
     def get_patch(self, index, p0, p1):
@@ -152,8 +152,8 @@ class Pancreas(Dataset):
     # These are stored as (depth, height, width) numpy arrays
     def _check_load_case(self, case):
         if self._volumes[case] is None:
-            for dic,dtype in zip([self._volumes, self._pancreas, self._tumor],
-                    ["imgs", "pancreas", "tumor"]):
+            for dic,dtype in zip([self._volumes, self._kidney, self._tumor],
+                    ["imgs", "kidney", "tumor"]):
                 dic[case] = np.load( pj(self._data_supdir, dtype, case),
                     mmap_mode="r" )
             if self._use_coordconv:
@@ -235,16 +235,16 @@ class Pancreas(Dataset):
             c = os.path.basename( os.path.abspath(case_path) )
             self._cases.append(c)
             self._volumes[c] = None
-            self._pancreas[c] = None
+            self._kidney[c] = None
             self._tumor[c] = None
 
 
 def _test_setup(args):
     cfg = vars(args)
-    dataset = Pancreas(cfg["data_supdir"], use_coordconv=cfg["use_coordconv"],
+    dataset = Kidney(cfg["data_supdir"], use_coordconv=cfg["use_coordconv"],
             return_path=True)
     N = len(dataset)
-    print("Created Pancreas dataset, length %d" % N)
+    print("Created Kidney dataset, length %d" % N)
     output_dir = cfg["output_dir"]
     if pe(output_dir):
         shutil.rmtree(output_dir)
@@ -274,13 +274,13 @@ def _test_main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--data-supdir", type=str,
-            default=pj(HOME, "Datasets/Pancreas/Volumes"))
+            default=pj(HOME, "Datasets/Kidney/Volumes"))
     parser.add_argument("-t", "--test", type=str, default="main",
             choices=["main", "inference"])
     parser.add_argument("--no-cc", "--no-coordconv", dest="use_coordconv",
             action="store_false")
     parser.add_argument("-o", "--output-dir", type=str,
-            default=pj(HOME, "Training/volume/test_out/Pancreas"))
+            default=pj(HOME, "Training/volume/test_out/Kidney"))
     parser.add_argument("-n", "--num-outputs", type=int, default=10)
     args = parser.parse_args()
     if args.test=="main":

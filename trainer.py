@@ -1,5 +1,5 @@
 """
-Volumetric segmentation for the Pancreas dataset
+Volumetric segmentation for the Kidney dataset
 """
 
 import argparse
@@ -24,7 +24,7 @@ from general.utils import copy_code, get_project_dir, \
 from pytorch.pyt_utils.utils import get_summary_writer, save_model_pop_old
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from datasets.pancreas import Pancreas, get_Pancreas_loaders
+from datasets.kidney import Kidney, get_Kidney_loaders
 from volume_utils import weighted_bce_loss, weighted_dice
 
 from inference import seg_tile_inference
@@ -375,8 +375,8 @@ def main(args):
     copy_code( get_project_dir("volume", os.path.abspath(__file__)),
             cfg["session_dir"] )
     writer = get_summary_writer(cfg["session_dir"])
-    if cfg["dataset"] == "pancreas":
-        train_loader,test_loader = get_Pancreas_loaders(cfg)
+    if cfg["dataset"] == "kidney":
+        train_loader,test_loader = get_Kidney_loaders(cfg)
     else:
         raise RuntimeError("Unrecognized dataset, %s" % cfg["dataset"])
     print("Length of training dataset, %s: %d" \
@@ -395,13 +395,13 @@ if __name__ == "__main__":
             default=pj(HOME, "Training/volume/test_out/trainer"))
 
     # Dataset
-    parser.add_argument("-d", "--dataset", type=str, default="pancreas",
-            choices=["pancreas"])
+    parser.add_argument("-d", "--dataset", type=str, default="kidney",
+            choices=["kidney"])
     parser.add_argument("-m", "--model", type=str, default="vnet")
     parser.add_argument("--train-valid-split", type=float, default=0.85)
-    parser.add_argument("--pancreas-data-supdir", type=str,
-            default=pj(HOME, "Datasets/Pancreas/Volumes"))
-    parser.add_argument("--pancreas-output-cat", type=str, default="pancreas")
+    parser.add_argument("--kidney-data-supdir", type=str,
+            default=pj(HOME, "Datasets/Kidney/Volumes"))
+    parser.add_argument("--kidney-output-cat", type=str, default="kidney")
 
     # Augmentation
     parser.add_argument("--no-coordconv", dest="use_coordconv",

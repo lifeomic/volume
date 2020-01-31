@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 from general.utils import read_session_config
 from pytorch.pyt_utils.utils import get_recent_model, get_resnet_model
 
-from datasets.pancreas import get_Pancreas_loaders, Pancreas
+from datasets.kidney import get_Kidney_loaders, Kidney
 from models.vnet import get_vnet, VNet
 from volume_utils import make_xyzr_gradients
 
@@ -148,7 +148,7 @@ def _merge_patch_preds(patch_preds, patch_coords):
 
 def _write_pred_image(pred, pred_dir, img_path, resize_before_save=False):
     img_stub = os.path.splitext( os.path.basename(img_path) )[0]
-    if "Pancreas" in img_path:
+    if "Kidney" in img_path:
         case = os.path.splitext( os.path.basename( os.path.dirname( \
                 os.path.dirname(img_path) ) ) )[0]
         img_stub = case + "_" + img_stub
@@ -247,8 +247,8 @@ def set_up_config(cfg):
     source_cfg = read_session_config(logfile)
     cfg["model_path"] = get_recent_model( pj(source_cfg["session_dir"],
         "models") )
-    for k in ["dataset", "palm_data_supdir", "pancreas_data_supdir",
-            "pancreas_output_cat", "input_size",
+    for k in ["dataset", "palm_data_supdir", "kidney_data_supdir",
+            "kidney_output_cat", "input_size",
             "use_coordconv", "patch_depth", "patch_height", "patch_width",
             "model", "num_base_chans", "num_unet_layers", "broadcast_si",
             "structured_inputs", "decoder_type"]:
@@ -281,8 +281,8 @@ def set_up_config(cfg):
 def main(args):
     cfg = vars(args)
     cfg = set_up_config(cfg)
-    if cfg["dataset"]=="pancreas":
-        data_loader = get_Pancreas_loaders(cfg, loaders="test")
+    if cfg["dataset"]=="kidney":
+        data_loader = get_Kidney_loaders(cfg, loaders="test")
     else:
         raise RuntimeError("Unrecognized dataset, %s" % cfg["dataset"])
     model = load_vnet(cfg)

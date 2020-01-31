@@ -29,7 +29,7 @@ def main(args):
         if pe(volumes_supdir):
             shutil.rmtree(volumes_supdir)
         os.makedirs(volumes_supdir)
-        for d in ["imgs", "pancreas", "tumor"]:
+        for d in ["imgs", "kidney", "tumor"]:
             os.makedirs(pj(volumes_supdir, d))
     for case in cases:
         case_name = os.path.basename(os.path.abspath(case))
@@ -40,7 +40,7 @@ def main(args):
             if pe(new_dir):
                 shutil.rmtree(new_dir)
             os.makedirs(new_dir)
-            for d in ["imgs", "pancreas", "tumor"]:
+            for d in ["imgs", "kidney", "tumor"]:
                 os.makedirs(pj(new_dir, d))
         vol = vol.get_data()
         vol = hu_to_grayscale(vol, DEFAULT_HU_MIN, DEFAULT_HU_MAX)\
@@ -53,7 +53,7 @@ def main(args):
             save_str = pj(volumes_supdir, "%s", case_name)
             np.save(save_str % "imgs", vol, allow_pickle=True)
             panc = 255 * (seg!=1).astype(np.uint8)
-            np.save(save_str % "pancreas", panc, allow_pickle=True)
+            np.save(save_str % "kidney", panc, allow_pickle=True)
             tumor = 255 * (seg!=2).astype(np.uint8)
             np.save(save_str % "tumor", tumor, allow_pickle=True)
         else:
@@ -63,7 +63,7 @@ def main(args):
                 img.save( pj(new_dir, "imgs/%04d.png" % ct) )
                 panc = 255 * (label!=1).astype(np.uint8)
                 panc = Image.fromarray(panc).convert("L")
-                panc.save( pj(new_dir, "pancreas/%04d.png" % ct) )
+                panc.save( pj(new_dir, "kidney/%04d.png" % ct) )
                 tumor = 255 * (label!=2).astype(np.uint8)
                 tumor = Image.fromarray(tumor).convert("L")
                 tumor.save( pj(new_dir, "tumor/%04d.png" % ct) )
@@ -74,7 +74,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--data-supdir", type=str, 
-            default=pj(HOME, "Datasets/Pancreas/Cases"))
+            default=pj(HOME, "Datasets/BiomedVolumes/KiTS19/Cases"))
     parser.add_argument("--source-dir", type=str,
             default=pj(HOME, "Repos/neheller/kits19/data"))
     parser.add_argument("-v", "--volumes", action="store_true")
