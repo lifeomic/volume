@@ -278,8 +278,7 @@ def set_up_config(cfg):
     devnull = [print("%s: %s" % (k,v)) for k,v in cfg.items()]
     return cfg
 
-def main(args):
-    cfg = vars(args)
+def main(cfg):
     cfg = set_up_config(cfg)
     if cfg["dataset"]=="kidney":
         data_loader = get_Kidney_loaders(cfg, loaders="test")
@@ -310,6 +309,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=24)
     parser.add_argument("--cuda", type=int, default=0, help="-1 for CPU")
 
-    args = parser.parse_args()
-    main(args)
+    cfg = vars( parser.parse_args() )
+    main(cfg)
 
